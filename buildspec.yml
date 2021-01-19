@@ -18,6 +18,5 @@ phases:
       - echo "Completed post_build - $(date)"
 artifacts:
   files:
-    - ${TEMPLATE_PATH}
-    - ${PARAMETER_FILE_NAME}
+    - template.yml
   discard-paths: no
