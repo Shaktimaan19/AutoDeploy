@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWS cloudformation template for deploying lambda function to ssh into airflow instance
+Parameters:
+  p01StoreBucketName:
+    Type: String
+    Description: Bucket store where lambda function zip and paramiko layer is stored
+    Default: codeconfig
+  p02LambdaS3Key:
+    Type: String
+    Description: S3 Key of Lambda function zip file
+    Default: sshtest.zip
+  p03ParamikoLayerS3Key:
+    Type: String
+    Description: S3 Key of Paramiko Lambda layer zip file
+    Default: paramiko.zip
+  p04LambdaFunctionName:
+    Type: String
+    Description: Name of the lambda function to deploy
+    Default: testmyfunc  
+  p05LambdaSubnetIds:
+    Type: CommaDelimitedList
+    Description: List of subnet ids for Lambda configuration
+    Default: subnet-0823a6c1d827ac214
+  p06AirflowInstanceId:
+    Type: String
+    Description: InstanceId of the airflow instance
+    Default: i-008ebf8b2580bc71f
+Resources:
+  ParamikoLayer:
+    Type: AWS::Lambda::LayerVersion
+    DependsOn: LambdaRole
+    Properties:
+      CompatibleRuntimes:
+        - python3.6
+        - python3.7
+        - python3.8
+      Content:
+        S3Bucket: !Ref p01StoreBucketName
+        S3Key: !Ref p03ParamikoLayerS3Key
+      Description: Paramiko lambda layer for ssh
+      LayerName: ssh
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: LambdaSecurityGroup
+    Properties:
+      GroupDescription: Security group attach to Airflow Instance
+      GroupName: LambdaSSHAirflowInstance
+  InstanceSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: InstanceSecurityGroup
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: ParamikoLayer
+    Properties:
+      GroupDescription: Security group attach to LambdaFunction
+      GroupName: SSHLambdaSecurityGroup
+  LambdaRole:
+    Type: AWS::IAM::Role
+    DependsOn: Ec2InstanceConnectPolicy
+    Properties:
+      RoleName: SSHLambdaRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - !Ref LambdaKMSReadPolicy
+        - !Ref Ec2InstanceConnectPolicy
+      PermissionsBoundary: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/LZ-IAM-Boundary'
+  LambdaKMSReadPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      ManagedPolicyName: LambdaKMSReadPolicy
+      Description: AWS IAM Policy for to grant KMS read access
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - kms:GetParametersForImport
+              - kms:DescribeCustomKeyStores
+              - kms:ListKeys
+              - kms:GetPublicKey
+              - kms:ListKeyPolicies
+              - kms:ListRetirableGrants
+              - kms:GetKeyRotationStatus
+              - kms:ListAliases
+              - kms:GetKeyPolicy
+              - kms:DescribeKey
+              - kms:ListResourceTags
+              - kms:ListGrants
+            Resource: "*"
+  Ec2InstanceConnectPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    DependsOn: LambdaKMSReadPolicy
+    Properties:
+      ManagedPolicyName: LambdaKMSReadPolicy
+      Description: AWS IAM Policy for to grant KMS read access
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:DescribeInstances
+              - ec2-instance-connect:SendSSHPublicKey
+            Resource: 
+              - !Sub arn:aws:ec2:us-east-2:${AWS::AccountId}:instance/${p06AirflowInstanceId}
+  SSHLambdaFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: InstanceSecurityGroupIngress
+    Properties:
+      FunctionName: !Sub ${p04LambdaFunctionName}
+      Description: Lambda function to ssh and run script into airflow instance
+      Layers:
+        - !GetAtt
+          - ParamikoLayer
+          - Arn
+      Code:
+        S3Bucket: !Ref p01StoreBucketName
+        S3Key: !Ref p02LambdaS3Key
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.7
+      Timeout: 300
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds: !Ref p05LambdaSubnetIds
+        Role: 
+          !GetAtt
+            - LambdaRole
+            - Arn
