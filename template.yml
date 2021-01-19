@@ -9,10 +9,6 @@ Parameters:
     Type: String
     Description: S3 Key of Lambda function zip file
     Default: sshtest.zip
-  p03ParamikoLayerS3Key:
-    Type: String
-    Description: S3 Key of Paramiko Lambda layer zip file
-    Default: paramiko.zip
   p04LambdaFunctionName:
     Type: String
     Description: Name of the lambda function to deploy
@@ -26,19 +22,6 @@ Parameters:
     Description: InstanceId of the airflow instance
     Default: i-008ebf8b2580bc71f
 Resources:
-  ParamikoLayer:
-    Type: AWS::Lambda::LayerVersion
-    DependsOn: LambdaRole
-    Properties:
-      CompatibleRuntimes:
-        - python3.6
-        - python3.7
-        - python3.8
-      Content:
-        S3Bucket: !Ref p01StoreBucketName
-        S3Key: !Ref p03ParamikoLayerS3Key
-      Description: Paramiko lambda layer for ssh
-      LayerName: ssh
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     DependsOn: LambdaSecurityGroup
@@ -56,7 +39,7 @@ Resources:
       SourceSecurityGroupId: !Ref LambdaSecurityGroup
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
-    DependsOn: ParamikoLayer
+    DependsOn: LambdaRole
     Properties:
       GroupDescription: Security group attach to LambdaFunction
       GroupName: SSHLambdaSecurityGroup
@@ -126,9 +109,7 @@ Resources:
       FunctionName: !Sub ${p04LambdaFunctionName}
       Description: Lambda function to ssh and run script into airflow instance
       Layers:
-        - !GetAtt
-          - ParamikoLayer
-          - Arn
+        - !Sub arn:aws:lambda:ap-south-1:${AWS::AccountId}:layer:paramiko:3
       Code:
         S3Bucket: !Ref p01StoreBucketName
         S3Key: !Ref p02LambdaS3Key
